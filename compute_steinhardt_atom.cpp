@@ -31,6 +31,7 @@
 #include "memory.h"
 #include "error.h"
 #include "math_const.h"
+#include <iostream>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -90,10 +91,10 @@ ComputeSteinhardtAtom::ComputeSteinhardtAtom(LAMMPS *lmp, int narg, char **arg) 
             iarg += 2;
         } else error->all(FLERR,"Illegal compute steinhardt/atom command");
     }
-    
+    ncol = nnn+1;
     peratom_flag = 1;
-    size_peratom_cols = 0;
-    
+    size_peratom_cols = ncol;
+
     nmax = 0;
     maxneigh = 0;
 }
@@ -159,15 +160,18 @@ void ComputeSteinhardtAtom::compute_peratom()
     // grow order parameter array if necessary
     
     if (atom->nmax > nmax) {
+        memory->destroy(qnarray);
         memory->destroy(qnm_r);
         memory->destroy(qnm_i);
         memory->destroy(nearestNeighborList);
         memory->destroy(vector_atom);
         nmax = atom->nmax;
+        memory->create(qnarray,nmax,ncol,"orientorder/atom:qnarray");
         memory->create(qnm_r,nmax,2*l+1,"orientorder/atom:qnm_r");
         memory->create(qnm_i,nmax,2*l+1,"orientorder/atom:qnm_i");
         memory->create(nearestNeighborList,nmax,nnn,"orientorder/atom:nearestNeighborList");
         memory->create(vector_atom,nmax,"orientorder/atom:vector_atom");
+        array_atom = qnarray;
     }
     
     // invoke full neighbor list (will copy or build if necessary)
@@ -187,17 +191,20 @@ void ComputeSteinhardtAtom::compute_peratom()
     
     for (ii = 0; ii < inum; ii++) {
         i = ilist[ii];
-        vector_atom[i] = 0;
-        if (mask[i] & groupbit) {
+        qnarray[i][0] = -2;
+        for(j=1; j<ncol; j++) {
+            qnarray[i][j] = -2;
+        }
+
+        vector_atom[i] = -2; // Reset compute values for this atom
+        if (mask[i] & groupbit) { // Make sure atom i is in the group
             xtmp = x[i][0];
             ytmp = x[i][1];
             ztmp = x[i][2];
             jlist = firstneigh[i];
             jnum = numneigh[i];
             
-            // insure distsq and nearest arrays are long enough
-            
-            if (jnum > maxneigh) {
+            if (jnum > maxneigh) { // Reallocate if arrays too small
                 memory->destroy(distsq);
                 memory->destroy(rlist);
                 memory->destroy(nearest);
@@ -217,7 +224,7 @@ void ComputeSteinhardtAtom::compute_peratom()
                 j = jlist[jj];
                 j &= NEIGHMASK;
                 
-                if (mask[j] & groupbit) {
+                if (mask[j] & groupbit) { // Make sure atom j is in the group
                     delx = xtmp - x[j][0];
                     dely = ytmp - x[j][1];
                     delz = ztmp - x[j][2];
@@ -232,11 +239,10 @@ void ComputeSteinhardtAtom::compute_peratom()
                 }
             }
             
-            // if not nnn neighbors, order parameter = 0;
-            
+            // if not nnn neighbors, order parameter = nan;
             for(int mIndex=0; mIndex<2*l+1; mIndex++) {
-                qnm_r[i][mIndex] = sqrt(-1);
-                qnm_i[i][mIndex] = sqrt(-1);
+                qnm_r[i][mIndex] = -2;
+                qnm_i[i][mIndex] = -2;
             }
             
             if ((ncount == 0) || (ncount < nnn)) {
@@ -276,22 +282,30 @@ void ComputeSteinhardtAtom::compute_peratom()
                 double c = qnm_r[j][mIndex]; // q_l for atom j is c+id
                 double d = qnm_i[j][mIndex];
                 
-                Qij_real += a*c - b*d; // (a+ib) * (c + id) real part
-                Qij_imag += b*c + a*d; // (a+ib) * (c + id) imaginary part
+                Qij_real += a*c + b*d; // (a+ib) * (c + id) real part
+                Qij_imag += a*d - b*c; // (a+ib) * (c + id) imaginary part
                 
                 iSum += a*a + b*b; // |a+ib|^2
                 jSum += c*c + d*d; // |c+id|^2
               }
-              iSum = sqrt(iSum);
-              jSum = sqrt(jSum);
-              Qij_real /= iSum*jSum; // normalize by the product of the normalization factors
+              
+              Qij_real /= sqrt(iSum*jSum); // normalize by the product of the normalization factors
+              // cout << "Q_ij_real = " << Qij_real << " and Q_ij_imag = " << Qij_imag / sqrt(iSum*jSum) << endl;
+              qnarray[i][jj+1] = Qij_real;
 
               if(qMin <= Qij_real && Qij_real <= qMax) {  
-                vector_atom[i] += 1;
+                qnarray[i][0] += 1;
               }
             }
         }
     }
+
+    // for (ii = 0; ii < inum; ii++) {
+    //     i = ilist[ii];
+    //     if (mask[i] & groupbit) {
+    //         if(vector_atom[i] != -2) cout << "c[" << i << "] = " << vector_atom[i] << endl;
+    //     }
+    // }
 }
 
 /* ----------------------------------------------------------------------
@@ -413,29 +427,14 @@ void ComputeSteinhardtAtom::calc_boop(int atomIndex) {
         }
         
         double costheta = r[2] / rmag;
-        double expphi_r = r[0];
-        double expphi_i = r[1];
-        double rxymag = sqrt(expphi_r*expphi_r+expphi_i*expphi_i);
-        if(rxymag <= MY_EPSILON) {
-            expphi_r = 1.0;
-            expphi_i = 0.0;
-        } else {
-            double rxymaginv = 1.0/rxymag;
-            expphi_r *= rxymaginv;
-            expphi_i *= rxymaginv;
-        }
-        
-        qnm_r[atomIndex][l] += polar_prefactor(l, 0, costheta); // corresponds to m=0
-        double expphim_r = expphi_r;
-        double expphim_i = expphi_i;
+        double phi = atan2(r[1], r[0]);
         for(int mIndex = 0; mIndex < 2*l+1; mIndex++) {
             int m = mIndex - l; // from -l to +l
-            
+            double cosMPhi = cos(m*phi);
+            double sinMPhi = sin(m*phi);
             double prefactor = polar_prefactor(l, m, costheta);
-            double c_r = prefactor * expphim_r;
-            double c_i = prefactor * expphim_i;
-            qnm_r[atomIndex][mIndex] = c_r;
-            qnm_i[atomIndex][mIndex] = c_i;
+            qnm_r[atomIndex][mIndex] = prefactor*cosMPhi;
+            qnm_i[atomIndex][mIndex] = prefactor*sinMPhi;
         }
     }
 }
