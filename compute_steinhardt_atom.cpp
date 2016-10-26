@@ -267,17 +267,24 @@ void ComputeSteinhardtAtom::compute_peratom()
               int j = jlist[jj];
               double Qij_real = 0;
               double Qij_imag = 0;
-              double iSum = 0;
-              double jSum = 0;
+              double iSum = 0; // normalization for i atom
+              double jSum = 0; // normalization for j atom
               for(int mIndex=0; mIndex<2*l+1; mIndex++) {
                 double a = qnm_r[i][mIndex]; // q_l for atom i is a+ib
                 double b = qnm_i[i][mIndex];
 
                 double c = qnm_r[j][mIndex]; // q_l for atom j is c+id
                 double d = qnm_i[j][mIndex];
-                Qij_real += a*c - b*d;
-                Qij_imag += b*c + a*d;
+                
+                Qij_real += a*c - b*d; // (a+ib) * (c + id) real part
+                Qij_imag += b*c + a*d; // (a+ib) * (c + id) imaginary part
+                
+                iSum += a*a + b*b; // |a+ib|^2
+                jSum += c*c + d*d; // |c+id|^2
               }
+              iSum = sqrt(iSum);
+              jSum = sqrt(jSum);
+              Qij_real /= iSum*jSum; // normalize by the product of the normalization factors
 
               if(qMin <= Qij_real && Qij_real <= qMax) {  
                 vector_atom[i] += 1;
