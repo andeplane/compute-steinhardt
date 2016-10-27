@@ -45,13 +45,14 @@ class ComputeSteinhardtAtom : public Compute {
   int qmax;
   double **qnarray;
   double cutsq;
-  std::complex<double> **qnm;
-  //double **qnm_r;
-  //double **qnm_i;
+  std::complex<double> **qnm; // To be removed in non-boost version
+  double **qnm_r;
+  double **qnm_i;
   int    **nearestNeighborList;
 
   void select3(int, int, double *, int *, double **);
   void calc_boop(int atomIndex);
+  void calc_boop_boost_complex(int atomIndex); // To be removed in non-boost version
   double dist(const double r[]);
 
   double polar_prefactor(int, int, double);
