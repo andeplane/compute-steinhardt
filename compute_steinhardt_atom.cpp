@@ -308,8 +308,10 @@ void ComputeSteinhardtAtom::compute_peratom()
                 iSum += a*a + b*b; // |a+ib|^2
                 jSum += c*c + d*d; // |c+id|^2
 
-                cout << a << " " << b << " " << c << " " << d << endl;
-                cout << qnm[i][mIndex].real() << " " << qnm[i][mIndex].imag() << " " << qnm[j][mIndex].real() << " " << qnm[j][mIndex].imag() << endl <<endl ;
+                cout << qnm[i][mIndex].real()-a << " " << qnm[i][mIndex].imag()-b << " " << qnm[j][mIndex].real()-c << " " << qnm[j][mIndex].imag()-d << endl <<endl ;
+
+                //cout << a << " " << b << " " << c << " " << d << endl;
+                //cout << qnm[i][mIndex].real() << " " << qnm[i][mIndex].imag() << " " << qnm[j][mIndex].real() << " " << qnm[j][mIndex].imag() << endl <<endl ;
 
               }
 
@@ -458,16 +460,17 @@ void ComputeSteinhardtAtom::calc_boop(int atomIndex)
 {
     for(int ineigh = 0; ineigh < nnn; ineigh++) {
         const double * const r = rlist[ineigh];
-        double theta = atan2(sqrt(r[0]*r[0]+r[1]*r[1]), r[2]);
+        double rdist = dist(r);
+        double cosTheta = r[2]/rdist;
+        //double theta = atan2(sqrt(r[0]*r[0]+r[1]*r[1]), r[2]);
         double phi = atan2(r[1], r[0]);
         for(int mIndex = 0; mIndex < 2*l+1; mIndex++) {
             int m = mIndex - l; // from -l to +l
-            double spherical_prefactor = spherical_prefactor(l, m, theta, phi);
-            qnm_r[atomIndex][mIndex] += spherical_prefactor*1;
-            qnm_i[atomIndex][mIndex] += spherical_prefactor*1;
+            std::pair<double, double> sph_harm = spherical_harmonic(l, m, phi, cosTheta);
+            qnm_r[atomIndex][mIndex] += sph_harm.first;
+            qnm_i[atomIndex][mIndex] += sph_harm.second;
         }
     }
-}
 }
 
 void ComputeSteinhardtAtom::calc_boop_boost_complex(int atomIndex) {
@@ -490,51 +493,90 @@ double ComputeSteinhardtAtom::dist(const double r[]) {
     return sqrt(r[0]*r[0] + r[1]*r[1] + r[2]*r[2]);
 }
 
-/* ----------------------------------------------------------------------
-   polar prefactor for spherical harmonic Y_l^m, where
-   Y_l^m (theta, phi) = prefactor(l, m, cos(theta)) * exp(i*m*phi)
-------------------------------------------------------------------------- */
-
-
-double ComputeSteinhardtAtom::
-polar_prefactor(int l, int m, double costheta) {
-    const int mabs = abs(m);
-
-    double prefactor = 1.0;
-    for (int i=l-mabs+1; i < l+mabs+1; ++i)
-        prefactor *= static_cast<double>(i);
-
-    prefactor = sqrt(static_cast<double>(2*l+1)/(MY_4PI*prefactor))
-            * associated_legendre(l,mabs,costheta);
-
-    if ((m >= 0) && (m % 2)) prefactor = -prefactor;
-
-    return prefactor;
-}
-
 
 /* ----------------------------------------------------------------------
    associated legendre polynomial
 ------------------------------------------------------------------------- */
+/*
+double associated_legendre(int l, int m, double x)
+{
+    const double PI = 3.14159265358979323;
+    if (m<0 || m>l || abs(x) > 1.0)
+        throw("Bad arguments in routine associated_legendre");
+    double prod = 1.0;
+    for (int j=l-m+1; j<=l+m; j++)
+        prod *= j;
+    return sqrt(4.0*PI*prod/(2*l+1))*renormalized_legendre(l,m,x)
+}
+*/
 
-double ComputeSteinhardtAtom::
-associated_legendre(int l, int m, double x) {
-    if (l < m) return 0.0;
+/* -----------------------------------------------------------
+    Computes the renormalized associated legendre polynomial
 
-    double p(1.0), pm1(0.0), pm2(0.0);
+    sqrt((2l+1)/4pi*(l-m)!/(l+m)!)P_l^m
+    P_l^m (x) = (-1)^m(1-x^2)^{m/2} d^m/dx^m P_l(x)
+    P_0(x) = 1
 
-    if (m != 0) {
-        const double sqx = sqrt(1.0-x*x);
-        for (int i=1; i < m+1; ++i)
-            p *= static_cast<double>(2*i-1) * sqx;
+-------------------------------------------------------------- */
+
+std::pair<double, double> ComputeSteinhardtAtom::spherical_harmonic(int l, int m, double phi, double cosTheta)
+{
+    double real_part = renormalized_legendre_positive_m(l, abs(m), cosTheta);
+    std::pair<double, double> result;
+    result.first = real_part*cos(m*phi);
+    result.second = real_part*sin(m*phi);
+    if (m>=0)
+    {
+        return result;
     }
-
-    for (int i=m+1; i < l+1; ++i) {
-        pm2 = pm1;
-        pm1 = p;
-        p = (static_cast<double>(2*i-1)*x*pm1
-             - static_cast<double>(i+m-1)*pm2) / static_cast<double>(i-m);
+    else
+    {
+        result.first = result.first*pow(-1, abs(m));
+        result.second  = result.second*pow(-1, abs(m));
+        return result;
     }
+}
 
-    return p;
+double ComputeSteinhardtAtom::renormalized_legendre_positive_m(int l, int m, double x)
+{
+    static const double PI = 3.14159265358979323;
+    int i, ll;
+    double fact, oldfact, pll, pmm, pmmp1, omx2;
+    if ( m<0 || m>l || abs(x) > 1.0 )
+        throw("Bad arguments in routine renormalized_legendre");
+    pmm = 1.0;
+    if (m>0)
+    {
+        omx2 = (1.0-x)*(1.0+x);
+        fact=1.0;
+        for (i=1; i<=m; i++)
+        {
+            pmm *= omx2*fact/(fact+1.0);
+            fact += 2.0;
+        }
+    }
+    pmm = sqrt((2*m+1)*pmm/(4.0*PI));
+    if (m & 1)
+        pmm = -pmm;
+    if (l == m)
+        return pmm;
+    else
+    {
+        pmmp1=x*sqrt(2.0*m+3.0)*pmm;
+        if (l == (m+1))
+            return pmmp1;
+        else
+        {
+            oldfact = sqrt(2.0*m+3.0);
+            for (ll=m+2;ll<=l;ll++)
+            {
+                fact = sqrt((4.0*ll*ll-1.0)/(ll*ll-m*m));
+                pll = (x*pmmp1-pmm/oldfact)*fact;
+                oldfact = fact;
+                pmm = pmmp1;
+                pmmp1=pll;
+            }
+            return pll;
+        }
+    }
 }
