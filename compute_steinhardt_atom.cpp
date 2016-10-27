@@ -105,6 +105,7 @@ ComputeSteinhardtAtom::ComputeSteinhardtAtom(LAMMPS *lmp, int narg, char **arg) 
 
 ComputeSteinhardtAtom::~ComputeSteinhardtAtom()
 {
+    memory->destroy(nearestNeighborList);
     memory->destroy(qnarray);
     memory->destroy(distsq);
     memory->destroy(rlist);
@@ -112,8 +113,6 @@ ComputeSteinhardtAtom::~ComputeSteinhardtAtom()
     memory->destroy(qnm);
     memory->destroy(qnm_r);
     memory->destroy(qnm_i);
-    memory->destroy(vector_atom);
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -168,14 +167,12 @@ void ComputeSteinhardtAtom::compute_peratom()
         memory->destroy(qnm_r);
         memory->destroy(qnm_i);
         memory->destroy(nearestNeighborList);
-        memory->destroy(vector_atom);
         nmax = atom->nmax;
         memory->create(qnarray,nmax,ncol,"orientorder/atom:qnarray");
         memory->create(qnm, nmax, 2*l+1, "orientorder/atom:qnm");
         memory->create(qnm_r,nmax,2*l+1,"orientorder/atom:qnm_r");
         memory->create(qnm_i,nmax,2*l+1,"orientorder/atom:qnm_i");
         memory->create(nearestNeighborList,nmax,nnn,"orientorder/atom:nearestNeighborList");
-        memory->create(vector_atom,nmax,"orientorder/atom:vector_atom");
         array_atom = qnarray;
     }
 
@@ -201,7 +198,6 @@ void ComputeSteinhardtAtom::compute_peratom()
             qnarray[i][j] = 0;
         }
 
-        vector_atom[i] = 0; // Reset compute values for this atom
         if (mask[i] & groupbit) { // Make sure atom i is in the group
             xtmp = x[i][0];
             ytmp = x[i][1];
@@ -350,11 +346,14 @@ void ComputeSteinhardtAtom::compute_peratom()
 
 double ComputeSteinhardtAtom::memory_usage()
 {
-    // double bytes = ncol*nmax * sizeof(double);
-    // bytes += (qmax*(2*qmax+1)+maxneigh*4) * sizeof(double);
-    // bytes += (nqlist+maxneigh) * sizeof(int);
-    // return bytes;
-  return 0;
+    double bytes = ncol*nmax * sizeof(double); // qnarray
+    bytes += nmax*(2*l+1) * sizeof(double); // qnm_r
+    bytes += nmax*(2*l+1) * sizeof(double); // qnm_i
+    bytes += nmax*nnn * sizeof(int); // nearestNeighborList
+    bytes += maxneigh * sizeof(double); // distsq
+    bytes += 3*maxneigh * sizeof(double); // rlist
+    bytes += maxneigh * sizeof(int); // nearest
+    return bytes;
 }
 
 /* ----------------------------------------------------------------------

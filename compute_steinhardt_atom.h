@@ -42,7 +42,6 @@ class ComputeSteinhardtAtom : public Compute {
   int *nearest;
   double **rlist;
   double qMin, qMax;
-  int qmax;
   double **qnarray;
   double cutsq;
   std::complex<double> **qnm; // To be removed in non-boost version
