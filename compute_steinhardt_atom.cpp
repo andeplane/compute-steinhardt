@@ -304,23 +304,41 @@ void ComputeSteinhardtAtom::compute_peratom()
                 iSum += a*a + b*b; // |a+ib|^2
                 jSum += c*c + d*d; // |c+id|^2
 
-                cout << qnm[i][mIndex].real()-a << " " << qnm[i][mIndex].imag()-b << " " << qnm[j][mIndex].real()-c << " " << qnm[j][mIndex].imag()-d << endl <<endl ;
+                // compare spherical harmonics from class functions and from boost
+                double a_comp = qnm[i][mIndex].real()-a;
+                double b_comp = qnm[i][mIndex].imag()-b;
+                double c_comp = qnm[j][mIndex].real()-c;
+                double d_comp = qnm[j][mIndex].imag()-d;
 
-                //cout << a << " " << b << " " << c << " " << d << endl;
-                //cout << qnm[i][mIndex].real() << " " << qnm[i][mIndex].imag() << " " << qnm[j][mIndex].real() << " " << qnm[j][mIndex].imag() << endl <<endl ;
+
+
+                //cout << "Q_ij_real = " << Qij_real << " and Q_ij.real() = " << Qij.real() << " and difference = " << Qij_real-Qij.real() << endl;
+
+                if (abs(a_comp) > 100*MY_EPSILON || abs(b_comp) > 100*MY_EPSILON
+                    || abs(c_comp) > 100*MY_EPSILON || abs(d_comp) > 100*MY_EPSILON)
+                {
+                    cout << " m=" <<  mIndex - l << " l:" << l << endl;
+                    cout << a << " " << b << " " << c << " " << d << endl;
+                    cout << qnm[i][mIndex].real()-a << " " << qnm[i][mIndex].imag()-b << " " << qnm[j][mIndex].real()-c << " " << qnm[j][mIndex].imag()-d << endl <<endl ;
+                    throw("Mismatch in class and boost version of spherical harmonics");
+                }
 
               }
 
               Qij_real /= sqrt(iSum*jSum); // normalize by the product of the normalization factors
-              //cout << "Q_ij_real = " << Qij_real << " and Q_ij_imag = " << Qij_imag / sqrt(iSum*jSum) << endl;
               Qij = Qij/sqrt(real(iSumc)*real(jSumc));
+
+              if (Qij_real-Qij.real() > 10000*MY_EPSILON)
+              {
+                  cout << "Qij_real-Qij.real() = " << Qij_real-Qij.real() << endl;
+              }
 
               //cout << abs(Qij_real) - abs(std::real(Qij)) << " ";
 
               qnarray[i][jj+1] = Qij_real;
               //qnarray[i][jj+1] = std::real(Qij);
               //cout << Qij << endl;
-              if(qMin <= std::real(Qij) && std::real(Qij) <= qMax) {
+              if(qMin <= Qij_real && Qij_real <= qMax) {
                 if (qnarray[i][0] < 0)
                 {
                     qnarray[i][0] = 1;
