@@ -21,6 +21,7 @@ ComputeStyle(steinhardt/atom,ComputeSteinhardtAtom)
 #define LMP_COMPUTE_STEINHARDT_ATOM_H
 
 #include "compute.h"
+#include <complex>
 
 namespace LAMMPS_NS {
 
@@ -44,8 +45,9 @@ class ComputeSteinhardtAtom : public Compute {
   int qmax;
   double **qnarray;
   double cutsq;
-  double **qnm_r;
-  double **qnm_i;
+  std::complex<double> **qnm;
+  //double **qnm_r;
+  //double **qnm_i;
   int    **nearestNeighborList;
 
   void select3(int, int, double *, int *, double **);

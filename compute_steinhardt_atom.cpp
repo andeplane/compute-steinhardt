@@ -2,12 +2,12 @@
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
-   
+
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
    certain rights in this software.  This software is distributed under
    the GNU General Public License.
-   
+
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
@@ -32,6 +32,7 @@
 #include "error.h"
 #include "math_const.h"
 #include <iostream>
+#include <boost/math/special_functions/spherical_harmonic.hpp>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -47,23 +48,24 @@ using namespace std;
 
 ComputeSteinhardtAtom::ComputeSteinhardtAtom(LAMMPS *lmp, int narg, char **arg) :
     Compute(lmp, narg, arg),
-    distsq(NULL), nearest(NULL), rlist(NULL), qnarray(NULL), qnm_r(NULL), qnm_i(NULL), nearestNeighborList(NULL)
+    distsq(NULL), nearest(NULL), rlist(NULL), qnarray(NULL), qnm(NULL), nearestNeighborList(NULL)
+    //qnm_r(NULL), qnm_i(NULL),
 {
     if (narg < 3 ) error->all(FLERR,"Illegal compute steinhardt/atom command");
-    
+
     // set default values for optional args
-    
+
     nnn = 12;
     cutsq = 0.0;
     qMin = 0.812;
     qMax = 1.0;
     // process optional args
-    
+
     int iarg = 3;
     while (iarg < narg) {
         if (strcmp(arg[iarg],"nnn") == 0) {
             if (iarg+2 > narg) error->all(FLERR,"Illegal compute steinhardt/atom command");
-            if (strcmp(arg[iarg+1],"NULL") == 0) 
+            if (strcmp(arg[iarg+1],"NULL") == 0)
                 nnn = 0;
             else {
                 nnn = force->numeric(FLERR,arg[iarg+1]);
@@ -107,10 +109,11 @@ ComputeSteinhardtAtom::~ComputeSteinhardtAtom()
     memory->destroy(distsq);
     memory->destroy(rlist);
     memory->destroy(nearest);
-    memory->destroy(qnm_r);
-    memory->destroy(qnm_i);
+    memory->destroy(qnm);
+    //memory->destroy(qnm_r);
+    //memory->destroy(qnm_i);
     memory->destroy(vector_atom);
-    
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -123,16 +126,16 @@ void ComputeSteinhardtAtom::init()
     else if (sqrt(cutsq) > force->pair->cutforce)
         error->all(FLERR,
                    "Compute steinhardt/atom cutoff is longer than pairwise cutoff");
-    
+
     // need an occasional full neighbor list
-    
+
     int irequest = neighbor->request(this,instance_me);
     neighbor->requests[irequest]->pair = 0;
     neighbor->requests[irequest]->compute = 1;
     neighbor->requests[irequest]->half = 0;
     neighbor->requests[irequest]->full = 1;
     neighbor->requests[irequest]->occasional = 1;
-    
+
     int count = 0;
     for (int i = 0; i < modify->ncompute; i++)
         if (strcmp(modify->compute[i]->style,"steinhardt/atom") == 0) count++;
@@ -154,41 +157,43 @@ void ComputeSteinhardtAtom::compute_peratom()
     int i,j,ii,jj,inum,jnum;
     double xtmp,ytmp,ztmp,delx,dely,delz,rsq;
     int *ilist,*jlist,*numneigh,**firstneigh;
-    
+
     invoked_peratom = update->ntimestep;
-    
+
     // grow order parameter array if necessary
-    
+
     if (atom->nmax > nmax) {
         memory->destroy(qnarray);
-        memory->destroy(qnm_r);
-        memory->destroy(qnm_i);
+        memory->destroy(qnm);
+        //memory->destroy(qnm_r);
+        //memory->destroy(qnm_i);
         memory->destroy(nearestNeighborList);
         memory->destroy(vector_atom);
         nmax = atom->nmax;
         memory->create(qnarray,nmax,ncol,"orientorder/atom:qnarray");
-        memory->create(qnm_r,nmax,2*l+1,"orientorder/atom:qnm_r");
-        memory->create(qnm_i,nmax,2*l+1,"orientorder/atom:qnm_i");
+        memory->create(qnm, nmax, 2*l+1, "orientorder/atom:qnm");
+        //memory->create(qnm_r,nmax,2*l+1,"orientorder/atom:qnm_r");
+        //memory->create(qnm_i,nmax,2*l+1,"orientorder/atom:qnm_i");
         memory->create(nearestNeighborList,nmax,nnn,"orientorder/atom:nearestNeighborList");
         memory->create(vector_atom,nmax,"orientorder/atom:vector_atom");
         array_atom = qnarray;
     }
-    
+
     // invoke full neighbor list (will copy or build if necessary)
-    
+
     neighbor->build_one(list);
-    
+
     inum = list->inum;
     ilist = list->ilist;
     numneigh = list->numneigh;
     firstneigh = list->firstneigh;
-    
+
     // compute order parameter for each atom in group
     // use full neighbor list to count atoms less than cutoff
-    
+
     double **x = atom->x;
     int *mask = atom->mask;
-    
+
     for (ii = 0; ii < inum; ii++) {
         i = ilist[ii];
         qnarray[i][0] = -2;
@@ -203,7 +208,7 @@ void ComputeSteinhardtAtom::compute_peratom()
             ztmp = x[i][2];
             jlist = firstneigh[i];
             jnum = numneigh[i];
-            
+
             if (jnum > maxneigh) { // Reallocate if arrays too small
                 memory->destroy(distsq);
                 memory->destroy(rlist);
@@ -213,17 +218,17 @@ void ComputeSteinhardtAtom::compute_peratom()
                 memory->create(rlist,maxneigh,3,"steinhardt/atom:rlist");
                 memory->create(nearest,maxneigh,"steinhardt/atom:nearest");
             }
-            
+
             // loop over list of all neighbors within force cutoff
             // distsq[] = distance sq to each
             // rlist[] = distance vector to each
             // nearest[] = atom indices of neighbors
-            
+
             int ncount = 0;
             for (jj = 0; jj < jnum; jj++) {
                 j = jlist[jj];
                 j &= NEIGHMASK;
-                
+
                 if (mask[j] & groupbit) { // Make sure atom j is in the group
                     delx = xtmp - x[j][0];
                     dely = ytmp - x[j][1];
@@ -238,32 +243,33 @@ void ComputeSteinhardtAtom::compute_peratom()
                     }
                 }
             }
-            
+
             // if not nnn neighbors, order parameter = nan;
             for(int mIndex=0; mIndex<2*l+1; mIndex++) {
-                qnm_r[i][mIndex] = -2;
-                qnm_i[i][mIndex] = -2;
+                qnm[i][mIndex] = 0 + 0i;
+                //qnm_r[i][mIndex] = -2;
+                //qnm_i[i][mIndex] = -2;
             }
-            
+
             if ((ncount == 0) || (ncount < nnn)) {
                 continue;
             }
-            
+
             // if nnn > 0, use only nearest nnn neighbors
-            
+
             if (nnn > 0) {
                 select3(nnn,ncount,distsq,nearest,rlist);
                 ncount = nnn;
             }
-            
+
             for(int j=0; j<nnn; j++) {
                 nearestNeighborList[i][j] = nearest[j];
             }
-            
+
             calc_boop(i);
         }
     }
-    
+
     for (ii = 0; ii < inum; ii++) {
         i = ilist[ii];
         if (mask[i] & groupbit) {
@@ -271,30 +277,45 @@ void ComputeSteinhardtAtom::compute_peratom()
             jnum = nnn;
             for (jj = 0; jj < jnum; jj++) {
               int j = jlist[jj];
-              double Qij_real = 0;
-              double Qij_imag = 0;
-              double iSum = 0; // normalization for i atom
-              double jSum = 0; // normalization for j atom
+              std::complex<double> Qij = 0 + 0i;
+              std::complex<double> iSum = 0 + 0i;
+              std::complex<double> jSum = 0 + 0i;
+              //double Qij_real = 0;
+              //double Qij_imag = 0;
+              //double iSum = 0; // normalization for i atom
+              //double jSum = 0; // normalization for j atom
               for(int mIndex=0; mIndex<2*l+1; mIndex++) {
-                double a = qnm_r[i][mIndex]; // q_l for atom i is a+ib
-                double b = qnm_i[i][mIndex];
+                Qij += qnm[i][mIndex]*std::conj(qnm[j][mIndex]);
+                iSum += qnm[i][mIndex]*std::conj(qnm[i][mIndex]);
+                jSum += qnm[j][mIndex]*std::conj(qnm[j][mIndex]);
+                //double a = qnm_r[i][mIndex]; // q_l for atom i is a+ib
+                //double b = qnm_i[i][mIndex];
 
-                double c = qnm_r[j][mIndex]; // q_l for atom j is c+id
-                double d = qnm_i[j][mIndex];
-                
-                Qij_real += a*c + b*d; // (a+ib) * (c + id) real part
-                Qij_imag += a*d - b*c; // (a+ib) * (c + id) imaginary part
-                
-                iSum += a*a + b*b; // |a+ib|^2
-                jSum += c*c + d*d; // |c+id|^2
+                //double c = qnm_r[j][mIndex]; // q_l for atom j is c+id
+                //double d = qnm_i[j][mIndex];
+
+                //Qij_real += a*c + b*d; // (a+ib) * (c + id) real part
+                //Qij_imag += a*d - b*c; // (a+ib) * (c + id) imaginary part
+
+                //iSum += a*a + b*b; // |a+ib|^2
+                //jSum += c*c + d*d; // |c+id|^2
               }
-              
-              Qij_real /= sqrt(iSum*jSum); // normalize by the product of the normalization factors
-              // cout << "Q_ij_real = " << Qij_real << " and Q_ij_imag = " << Qij_imag / sqrt(iSum*jSum) << endl;
-              qnarray[i][jj+1] = Qij_real;
 
-              if(qMin <= Qij_real && Qij_real <= qMax) {  
-                qnarray[i][0] += 1;
+              //Qij_real /= sqrt(iSum*jSum); // normalize by the product of the normalization factors
+              //cout << "Q_ij_real = " << Qij_real << " and Q_ij_imag = " << Qij_imag / sqrt(iSum*jSum) << endl;
+              Qij = Qij/sqrt(real(iSum)*real(jSum));
+              //qnarray[i][jj+1] = Qij_real;
+              qnarray[i][jj+1] = std::real(Qij);
+              cout << Qij << endl;
+              if(qMin <= std::real(Qij) && std::real(Qij) <= qMax) {
+                if (qnarray[i][0] < 0)
+                {
+                    qnarray[i][0] = 1;
+                }
+                else
+                {
+                  qnarray[i][0] += 1;
+                }
               }
             }
         }
@@ -315,8 +336,8 @@ void ComputeSteinhardtAtom::compute_peratom()
 double ComputeSteinhardtAtom::memory_usage()
 {
     // double bytes = ncol*nmax * sizeof(double);
-    // bytes += (qmax*(2*qmax+1)+maxneigh*4) * sizeof(double); 
-    // bytes += (nqlist+maxneigh) * sizeof(int); 
+    // bytes += (qmax*(2*qmax+1)+maxneigh*4) * sizeof(double);
+    // bytes += (nqlist+maxneigh) * sizeof(int);
     // return bytes;
   return 0;
 }
@@ -349,7 +370,7 @@ void ComputeSteinhardtAtom::select3(int k, int n, double *arr, int *iarr, double
 {
     int i,ir,j,l,mid,ia,itmp;
     double a,tmp,a3[3];
-    
+
     arr--;
     iarr--;
     arr3--;
@@ -421,20 +442,22 @@ void ComputeSteinhardtAtom::select3(int k, int n, double *arr, int *iarr, double
 void ComputeSteinhardtAtom::calc_boop(int atomIndex) {
     for(int ineigh = 0; ineigh < nnn; ineigh++) {
         const double * const r = rlist[ineigh];
-        double rmag = dist(r);
-        if(rmag <= MY_EPSILON) {
-            return;
-        }
-        
-        double costheta = r[2] / rmag;
+        //double rmag = dist(r);
+        //if(rmag <= MY_EPSILON) {
+        //    return;
+        //}
+
+        //double costheta = r[2] / rmag;
+        double theta = atan2(sqrt(r[0]*r[0]+r[1]*r[1]), r[2]);
         double phi = atan2(r[1], r[0]);
         for(int mIndex = 0; mIndex < 2*l+1; mIndex++) {
             int m = mIndex - l; // from -l to +l
-            double cosMPhi = cos(m*phi);
-            double sinMPhi = sin(m*phi);
-            double prefactor = polar_prefactor(l, m, costheta);
-            qnm_r[atomIndex][mIndex] = prefactor*cosMPhi;
-            qnm_i[atomIndex][mIndex] = prefactor*sinMPhi;
+            qnm[atomIndex][mIndex] += boost::math::spherical_harmonic(l, m, theta, phi);
+            //double cosMPhi = cos(m*phi);
+            //double sinMPhi = sin(m*phi);
+            //double prefactor = polar_prefactor(l, m, costheta);
+            //qnm_r[atomIndex][mIndex] = prefactor*cosMPhi;
+            //qnm_i[atomIndex][mIndex] = prefactor*sinMPhi;
         }
     }
 }
@@ -448,49 +471,51 @@ double ComputeSteinhardtAtom::dist(const double r[]) {
 }
 
 /* ----------------------------------------------------------------------
-   polar prefactor for spherical harmonic Y_l^m, where 
+   polar prefactor for spherical harmonic Y_l^m, where
    Y_l^m (theta, phi) = prefactor(l, m, cos(theta)) * exp(i*m*phi)
 ------------------------------------------------------------------------- */
 
+/*
 double ComputeSteinhardtAtom::
 polar_prefactor(int l, int m, double costheta) {
     const int mabs = abs(m);
-    
+
     double prefactor = 1.0;
     for (int i=l-mabs+1; i < l+mabs+1; ++i)
         prefactor *= static_cast<double>(i);
-    
+
     prefactor = sqrt(static_cast<double>(2*l+1)/(MY_4PI*prefactor))
             * associated_legendre(l,mabs,costheta);
-    
+
     if ((m >= 0) && (m % 2)) prefactor = -prefactor;
-    
+
     return prefactor;
 }
+*/
 
 /* ----------------------------------------------------------------------
    associated legendre polynomial
 ------------------------------------------------------------------------- */
-
+/*
 double ComputeSteinhardtAtom::
 associated_legendre(int l, int m, double x) {
     if (l < m) return 0.0;
-    
+
     double p(1.0), pm1(0.0), pm2(0.0);
-    
+
     if (m != 0) {
         const double sqx = sqrt(1.0-x*x);
         for (int i=1; i < m+1; ++i)
             p *= static_cast<double>(2*i-1) * sqx;
     }
-    
+
     for (int i=m+1; i < l+1; ++i) {
         pm2 = pm1;
         pm1 = p;
         p = (static_cast<double>(2*i-1)*x*pm1
              - static_cast<double>(i+m-1)*pm2) / static_cast<double>(i-m);
     }
-    
+
     return p;
 }
-
+*/
