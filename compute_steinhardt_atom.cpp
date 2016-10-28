@@ -315,7 +315,7 @@ void ComputeSteinhardtAtom::compute_peratom()
                 //cout << "Q_ij_real = " << Qij_real << " and Q_ij.real() = " << Qij.real() << " and difference = " << Qij_real-Qij.real() << endl;
 
                 if (abs(a_comp) > 100*MY_EPSILON || abs(b_comp) > 100*MY_EPSILON
-                    || abs(c_comp) > 100*MY_EPSILON || abs(d_comp) > 100*MY_EPSILON)
+                    || abs(c_comp) > 100*MY_EPSILON || abs(d_comp) > 100*MY_EPSILON)
                 {
                     cout << " m=" <<  mIndex - l << " l:" << l << endl;
                     cout << a << " " << b << " " << c << " " << d << endl;
