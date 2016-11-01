@@ -32,8 +32,6 @@
 #include "memory.h"
 #include "error.h"
 #include "math_const.h"
-#include <iostream>
-#include <boost/math/special_functions/spherical_harmonic.hpp>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -49,7 +47,7 @@ using namespace std;
 
 ComputeSteinhardtAtom::ComputeSteinhardtAtom(LAMMPS *lmp, int narg, char **arg) :
     Compute(lmp, narg, arg),
-    distsq(NULL), nearest(NULL), rlist(NULL), qnarray(NULL), qnm_r(NULL), qnm_i(NULL), qnm(NULL), nearestNeighborList(NULL)
+    distsq(NULL), nearest(NULL), rlist(NULL), qnarray(NULL), qnm_r(NULL), qnm_i(NULL), nearestNeighborList(NULL)
 {
     if (narg < 3 ) error->all(FLERR,"Illegal compute steinhardt/atom command");
 
@@ -96,7 +94,7 @@ ComputeSteinhardtAtom::ComputeSteinhardtAtom(LAMMPS *lmp, int narg, char **arg) 
     ncol = nnn+1;
     peratom_flag = 1;
     size_peratom_cols = ncol;
-    comm_forward = 1;
+    comm_forward = 2*(2*l+1); // real and imaginary part of 2*l+1 different m values
 
     nmax = 0;
     maxneigh = 0;
@@ -111,7 +109,6 @@ ComputeSteinhardtAtom::~ComputeSteinhardtAtom()
     memory->destroy(distsq);
     memory->destroy(rlist);
     memory->destroy(nearest);
-    memory->destroy(qnm);
     memory->destroy(qnm_r);
     memory->destroy(qnm_i);
 }
@@ -164,13 +161,11 @@ void ComputeSteinhardtAtom::compute_peratom()
 
     if (atom->nmax > nmax) {
         memory->destroy(qnarray);
-        memory->destroy(qnm);
         memory->destroy(qnm_r);
         memory->destroy(qnm_i);
         memory->destroy(nearestNeighborList);
         nmax = atom->nmax;
         memory->create(qnarray,nmax,ncol,"orientorder/atom:qnarray");
-        memory->create(qnm, nmax, 2*l+1, "orientorder/atom:qnm");
         memory->create(qnm_r,nmax,2*l+1,"orientorder/atom:qnm_r");
         memory->create(qnm_i,nmax,2*l+1,"orientorder/atom:qnm_i");
         memory->create(nearestNeighborList,nmax,nnn,"orientorder/atom:nearestNeighborList");
@@ -243,7 +238,6 @@ void ComputeSteinhardtAtom::compute_peratom()
 
             // if not nnn neighbors, order parameter = nan;
             for(int mIndex=0; mIndex<2*l+1; mIndex++) {
-                qnm[i][mIndex] = sqrt(-1) + 0i;
                 qnm_r[i][mIndex] = sqrt(-1);
                 qnm_i[i][mIndex] = sqrt(-1);
             }
@@ -253,7 +247,6 @@ void ComputeSteinhardtAtom::compute_peratom()
             }
 
             for(int mIndex=0; mIndex<2*l+1; mIndex++) {
-                qnm[i][mIndex] = 0 + 0i;
                 qnm_r[i][mIndex] = 0;
                 qnm_i[i][mIndex] = 0;
             }
@@ -269,13 +262,11 @@ void ComputeSteinhardtAtom::compute_peratom()
                 nearestNeighborList[i][j] = nearest[j];
             }
 
-            calc_boop_boost_complex(i);
             calc_boop(i);
 
         }
     }
 
-    comm_forward = 2*(2*l+1); // real and imaginary part of 2*l+1 different m values
     comm->forward_comm_compute(this);
 
     for (ii = 0; ii < inum; ii++) {
@@ -285,17 +276,11 @@ void ComputeSteinhardtAtom::compute_peratom()
             jnum = nnn;
             for (jj = 0; jj < jnum; jj++) {
               int j = jlist[jj];
-              std::complex<double> Qij = 0 + 0i;
-              std::complex<double> iSumc = 0 + 0i;
-              std::complex<double> jSumc = 0 + 0i;
               double Qij_real = 0;
               double Qij_imag = 0;
               double iSum = 0; // normalization for i atom
               double jSum = 0; // normalization for j atom
               for(int mIndex=0; mIndex<2*l+1; mIndex++) {
-                Qij += qnm[i][mIndex]*std::conj(qnm[j][mIndex]);
-                iSumc += qnm[i][mIndex]*std::conj(qnm[i][mIndex]);
-                jSumc += qnm[j][mIndex]*std::conj(qnm[j][mIndex]);
                 double a = qnm_r[i][mIndex]; // q_l for atom i is a+ib
                 double b = qnm_i[i][mIndex];
 
@@ -307,42 +292,10 @@ void ComputeSteinhardtAtom::compute_peratom()
 
                 iSum += a*a + b*b; // |a+ib|^2
                 jSum += c*c + d*d; // |c+id|^2
-
-                // compare spherical harmonics from class functions and from boost
-                double a_comp = qnm[i][mIndex].real()-a;
-                double b_comp = qnm[i][mIndex].imag()-b;
-                double c_comp = qnm[j][mIndex].real()-c;
-                double d_comp = qnm[j][mIndex].imag()-d;
-
-
-
-                //cout << "Q_ij_real = " << Qij_real << " and Q_ij.real() = " << Qij.real() << " and difference = " << Qij_real-Qij.real() << endl;
-
-                if (abs(a_comp) > 100*MY_EPSILON || abs(b_comp) > 100*MY_EPSILON
-                    || abs(c_comp) > 100*MY_EPSILON || abs(d_comp) > 100*MY_EPSILON)
-                {
-                    // cout << " m=" <<  mIndex - l << " l:" << l << endl;
-                    // cout << a << " " << b << " " << c << " " << d << endl;
-                    // cout << qnm[i][mIndex].real() << " " << qnm[i][mIndex].imag() << " " << qnm[j][mIndex].real() << " " << qnm[j][mIndex].imag() << endl <<endl ;
-                    // cout << qnm[i][mIndex].real()-a << " " << qnm[i][mIndex].imag()-b << " " << qnm[j][mIndex].real()-c << " " << qnm[j][mIndex].imag()-d << endl <<endl ;
-                    // throw("Mismatch in class and boost version of spherical harmonics");
-                }
-
               }
 
               Qij_real /= sqrt(iSum*jSum); // normalize by the product of the normalization factors
-              Qij = Qij/sqrt(real(iSumc)*real(jSumc));
-
-              if (Qij_real-Qij.real() > 10000*MY_EPSILON)
-              {
-                  cout << "Qij_real-Qij.real() = " << Qij_real-Qij.real() << endl;
-              }
-
-              //cout << abs(Qij_real) - abs(std::real(Qij)) << " ";
-
               qnarray[i][jj+1] = Qij_real;
-              //qnarray[i][jj+1] = std::real(Qij);
-              //cout << Qij << endl;
               if(qMin <= Qij_real && Qij_real <= qMax) {
                 if (qnarray[i][0] < 0)
                 {
@@ -356,13 +309,6 @@ void ComputeSteinhardtAtom::compute_peratom()
             }
         }
     }
-
-    // for (ii = 0; ii < inum; ii++) {
-    //     i = ilist[ii];
-    //     if (mask[i] & groupbit) {
-    //         if(vector_atom[i] != -2) cout << "c[" << i << "] = " << vector_atom[i] << endl;
-    //     }
-    // }
 }
 
 /* ----------------------------------------------------------------------
@@ -484,29 +430,12 @@ void ComputeSteinhardtAtom::calc_boop(int atomIndex)
         const double * const r = rlist[ineigh];
         double rdist = dist(r);
         double cosTheta = r[2]/rdist;
-        //double theta = atan2(sqrt(r[0]*r[0]+r[1]*r[1]), r[2]);
         double phi = atan2(r[1], r[0]);
         for(int mIndex = 0; mIndex < 2*l+1; mIndex++) {
             int m = mIndex - l; // from -l to +l
             std::pair<double, double> sph_harm = spherical_harmonic(l, m, phi, cosTheta);
-            if(sph_harm.first > 1e5) {
-                cout << "Dette var dumt" << endl;
-                terminate();
-            }
             qnm_r[atomIndex][mIndex] += sph_harm.first;
             qnm_i[atomIndex][mIndex] += sph_harm.second;
-        }
-    }
-}
-
-void ComputeSteinhardtAtom::calc_boop_boost_complex(int atomIndex) {
-    for(int ineigh = 0; ineigh < nnn; ineigh++) {
-        const double * const r = rlist[ineigh];
-        double theta = atan2(sqrt(r[0]*r[0]+r[1]*r[1]), r[2]);
-        double phi = atan2(r[1], r[0]);
-        for(int mIndex = 0; mIndex < 2*l+1; mIndex++) {
-            int m = mIndex - l; // from -l to +l
-            qnm[atomIndex][mIndex] += boost::math::spherical_harmonic(l, m, theta, phi);
         }
     }
 }
@@ -518,32 +447,6 @@ void ComputeSteinhardtAtom::calc_boop_boost_complex(int atomIndex) {
 double ComputeSteinhardtAtom::dist(const double r[]) {
     return sqrt(r[0]*r[0] + r[1]*r[1] + r[2]*r[2]);
 }
-
-
-/* ----------------------------------------------------------------------
-   associated legendre polynomial
-------------------------------------------------------------------------- */
-/*
-double associated_legendre(int l, int m, double x)
-{
-    const double PI = 3.14159265358979323;
-    if (m<0 || m>l || abs(x) > 1.0)
-        throw("Bad arguments in routine associated_legendre");
-    double prod = 1.0;
-    for (int j=l-m+1; j<=l+m; j++)
-        prod *= j;
-    return sqrt(4.0*PI*prod/(2*l+1))*renormalized_legendre(l,m,x)
-}
-*/
-
-/* -----------------------------------------------------------
-    Computes the renormalized associated legendre polynomial
-
-    sqrt((2l+1)/4pi*(l-m)!/(l+m)!)P_l^m
-    P_l^m (x) = (-1)^m(1-x^2)^{m/2} d^m/dx^m P_l(x)
-    P_0(x) = 1
-
--------------------------------------------------------------- */
 
 std::pair<double, double> ComputeSteinhardtAtom::spherical_harmonic(int l, int m, double phi, double cosTheta)
 {

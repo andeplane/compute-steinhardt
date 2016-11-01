@@ -19,9 +19,8 @@ ComputeStyle(steinhardt/atom,ComputeSteinhardtAtom)
 
 #ifndef LMP_COMPUTE_STEINHARDT_ATOM_H
 #define LMP_COMPUTE_STEINHARDT_ATOM_H
-
+#include <utility>
 #include "compute.h"
-#include <complex>
 
 namespace LAMMPS_NS {
 
@@ -44,18 +43,15 @@ class ComputeSteinhardtAtom : public Compute {
   double qMin, qMax;
   double **qnarray;
   double cutsq;
-  std::complex<double> **qnm; // To be removed in non-boost version
   double **qnm_r;
   double **qnm_i;
   int    **nearestNeighborList;
 
   void select3(int, int, double *, int *, double **);
   void calc_boop(int atomIndex);
-  void calc_boop_boost_complex(int atomIndex); // To be removed in non-boost version
   double dist(const double r[]);
 
   double spherical_harmonic_without_polar_angle(int l, int m, double phi, double cosTheta);
-  //double associated_legendre(int l, int m, double x);
   double renormalized_legendre_positive_m(int l, int m, double x);
   std::pair<double, double> spherical_harmonic(int l, int m, double phi, double cosTheta);
   virtual int pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc);
