@@ -96,6 +96,7 @@ ComputeSteinhardtAtom::ComputeSteinhardtAtom(LAMMPS *lmp, int narg, char **arg) 
     ncol = nnn+1;
     peratom_flag = 1;
     size_peratom_cols = ncol;
+    comm_forward = 1;
 
     nmax = 0;
     maxneigh = 0;
@@ -274,6 +275,9 @@ void ComputeSteinhardtAtom::compute_peratom()
         }
     }
 
+    comm_forward = 2*(2*l+1); // real and imaginary part of 2*l+1 different m values
+    comm->forward_comm_compute(this);
+
     for (ii = 0; ii < inum; ii++) {
         i = ilist[ii];
         if (mask[i] & groupbit) {
@@ -317,10 +321,11 @@ void ComputeSteinhardtAtom::compute_peratom()
                 if (abs(a_comp) > 100*MY_EPSILON || abs(b_comp) > 100*MY_EPSILON
                     || abs(c_comp) > 100*MY_EPSILON || abs(d_comp) > 100*MY_EPSILON)
                 {
-                    cout << " m=" <<  mIndex - l << " l:" << l << endl;
-                    cout << a << " " << b << " " << c << " " << d << endl;
-                    cout << qnm[i][mIndex].real()-a << " " << qnm[i][mIndex].imag()-b << " " << qnm[j][mIndex].real()-c << " " << qnm[j][mIndex].imag()-d << endl <<endl ;
-                    throw("Mismatch in class and boost version of spherical harmonics");
+                    // cout << " m=" <<  mIndex - l << " l:" << l << endl;
+                    // cout << a << " " << b << " " << c << " " << d << endl;
+                    // cout << qnm[i][mIndex].real() << " " << qnm[i][mIndex].imag() << " " << qnm[j][mIndex].real() << " " << qnm[j][mIndex].imag() << endl <<endl ;
+                    // cout << qnm[i][mIndex].real()-a << " " << qnm[i][mIndex].imag()-b << " " << qnm[j][mIndex].real()-c << " " << qnm[j][mIndex].imag()-d << endl <<endl ;
+                    // throw("Mismatch in class and boost version of spherical harmonics");
                 }
 
               }
@@ -484,6 +489,10 @@ void ComputeSteinhardtAtom::calc_boop(int atomIndex)
         for(int mIndex = 0; mIndex < 2*l+1; mIndex++) {
             int m = mIndex - l; // from -l to +l
             std::pair<double, double> sph_harm = spherical_harmonic(l, m, phi, cosTheta);
+            if(sph_harm.first > 1e5) {
+                cout << "Dette var dumt" << endl;
+                terminate();
+            }
             qnm_r[atomIndex][mIndex] += sph_harm.first;
             qnm_i[atomIndex][mIndex] += sph_harm.second;
         }
@@ -594,6 +603,33 @@ double ComputeSteinhardtAtom::renormalized_legendre_positive_m(int l, int m, dou
                 pmmp1=pll;
             }
             return pll;
+        }
+    }
+}
+
+int ComputeSteinhardtAtom::pack_forward_comm(int n, int *list, double *buf,
+                                                  int pbc_flag, int *pbc)
+{
+    int m = 0;
+    for (int i = 0; i < n; i++) {
+        int j = list[i];
+        for(int k=0; k<2*l+1; k++) {
+            buf[m++] = qnm_r[j][k];
+            buf[m++] = qnm_i[j][k];
+        }
+    }
+
+    return m;
+}
+
+void ComputeSteinhardtAtom::unpack_forward_comm(int n, int first, double *buf)
+{
+    int m = 0;
+    int last = first + n;
+    for (int i = first; i < last; i++) {
+        for(int k=0; k<2*l+1; k++) {
+            qnm_r[i][k] = buf[m++];
+            qnm_i[i][k] = buf[m++];
         }
     }
 }

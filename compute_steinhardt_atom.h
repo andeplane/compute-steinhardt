@@ -58,7 +58,8 @@ class ComputeSteinhardtAtom : public Compute {
   //double associated_legendre(int l, int m, double x);
   double renormalized_legendre_positive_m(int l, int m, double x);
   std::pair<double, double> spherical_harmonic(int l, int m, double phi, double cosTheta);
-
+  virtual int pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc);
+  virtual void unpack_forward_comm(int n, int first, double *buf);
 };
 
 }
